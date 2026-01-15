@@ -23,6 +23,11 @@
 - Google Sheets (데이터 저장)
 - HTML/CSS/JavaScript
 
+## FAQ
+### 승인 후에도 휴가를 취소할 수 있나요 ? 
+- 승인 후에는 캘린더에서 일정 취소가 가능합니다. 일정 취소를 하게 되면, 엑셀에서 상태값이 CANCLE로 바뀝니다 
+
+
 ## 개발자 정보
 
 문의: jiju@j2db.co.kr
