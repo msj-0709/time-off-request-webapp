@@ -1,4 +1,4 @@
-# ⏰ Time Off Request Web App
+<img width="143" height="116" alt="image" src="https://github.com/user-attachments/assets/d8d24914-66a1-456a-b7b8-e3b5261966e5" /># ⏰ Time Off Request Web App
 
 <div align="center">
 
@@ -29,10 +29,12 @@
 ## 🚀 빠른 시작
 
 ### 사용자 (휴가 신청)
-1. 관리자로부터 받은 웹 앱 URL에 접속
-2. 폼에 정보 입력
-3. 제출 버튼 클릭
-4. 완료!
+1. 관리자로부터 받은 웹 앱 URL에 접속 또는 마켓 플레이스에서 해당 시스템 설치
+    <img width="143" height="116" alt="image" src="https://github.com/user-attachments/assets/9e2aa826-5325-489e-b7ce-15c324237ec0" />
+
+3. 폼에 정보 입력
+4. 제출 버튼 클릭
+5. 완료!
 
 ### 관리자
 1. Google Sheets 생성
