@@ -140,9 +140,7 @@ const Utils = {
  */
 function writeToLog(action = "Action") {
   try {
-    const logSheet = SpreadsheetApp
-      .openById(CONFIG.SPREADSHEET_ID)
-      .getSheetByName(CONFIG.SHEETS.LOG);
+    const logSheet = getSheet_(CONFIG.SHEETS.LOG);
 
     if (logSheet) {
       logSheet.appendRow([

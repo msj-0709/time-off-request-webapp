@@ -187,6 +187,20 @@ const EmailService = {
    * @returns {string[]} 이메일 배열
    */
   _getAllCompanyEmails() {
+    // 6시간 캐시 (승인할 때마다 디렉터리 전체 조회하지 않도록)
+    const cache = CacheService.getScriptCache();
+    try {
+      const cached = cache.get("company_emails_v1");
+      if (cached) return JSON.parse(cached);
+    } catch (e) {}
+    const emails = this._loadAllCompanyEmails();
+    if (emails.length > 0) {
+      try { cache.put("company_emails_v1", JSON.stringify(emails), 21600); } catch (e) {}
+    }
+    return emails;
+  },
+
+  _loadAllCompanyEmails() {
     const domain = CONFIG.ANNOUNCEMENT_DOMAIN;
     const emails = [];
 

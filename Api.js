@@ -19,7 +19,19 @@ const DEFAULT_LEAVE_TYPES = "연차,경조휴가,병가,공가,기타";
  */
 function getBootstrap(token) {
   const ctx = _ctx_(token);
-  const rows = ctx.manager.data;
+  return _bootstrap_(ctx, new SheetManager(_getResponseSheet()), {});
+}
+
+/**
+ * 화면 데이터 생성
+ * 쓰기 작업 직후에는 이미 메모리에 있는 manager 를 재사용해 시트를 다시 읽지 않는다.
+ *
+ * @param {object} ctx - {email, isAdmin}
+ * @param {SheetManager} manager
+ * @param {object} opts - skipBalance: 잔여 연차 조회 생략(클라이언트가 기존 값 유지), refresh: 클라이언트에 백그라운드 새로고침 요청
+ */
+function _bootstrap_(ctx, manager, opts) {
+  const rows = manager.data;
   const holidays = _getHolidays_();
   const nameMap = _emailNameMap_(rows);
 
@@ -51,7 +63,9 @@ function getBootstrap(token) {
     approvers: _getApprovers_(rows, nameMap, ctx.email),
     leaveTypes: String(SETTINGS.LEAVE_TYPES || DEFAULT_LEAVE_TYPES).split(",").map(s => s.trim()).filter(Boolean),
     subTypes: LEAVE_SUB_TYPES,
-    balance: _getBalance_(myName),
+    balance: opts.skipBalance ? undefined : _getBalance_(myName),
+    keepBalance: !!opts.skipBalance,
+    refresh: !!opts.refresh,
     pendingDays,
     holidays: Object.keys(holidays),
     holidayNames: holidays,
@@ -94,8 +108,9 @@ function submitRequest(token, form) {
 
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
+  let manager;
   try {
-    const manager = new SheetManager(_getResponseSheet());
+    manager = new SheetManager(_getResponseSheet());
 
     // 본인 기존 신청과 기간 중복 체크
     const s = _fmt_(start), e = _fmt_(end);
@@ -125,12 +140,14 @@ function submitRequest(token, form) {
     row.appurl = CONFIG.WEB_APP_URL;
     EmailService.sendPendingEmail(row);
 
-    writeToLog(`App Submitted: ${name} ${s}~${e}`);
+    SpreadsheetApp.flush();
   } finally {
     lock.releaseLock();
   }
+  writeToLog(`App Submitted: ${name} ${_fmt_(start)}~${_fmt_(end)}`);
 
-  return getBootstrap(token);
+  // 신청(대기)은 잔여 연차(승인 기준)에 영향 없음 → 연차계산 시트 재조회 생략
+  return _bootstrap_(ctx, manager, { skipBalance: true });
 }
 
 /** 승인 (앱 내 승인함) */
@@ -152,19 +169,25 @@ function cancelRequest(token, id) {
   const ctx = _ctx_(token);
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
+  let manager, row, wasApproved;
   try {
-    const manager = new SheetManager(_getResponseSheet());
-    const row = manager.findById(id);
+    manager = new SheetManager(_getResponseSheet());
+    row = manager.findById(id);
     if (!row) throw new Error("해당 신청을 찾을 수 없습니다.");
     if (String(row.이메일주소 || "").toLowerCase() !== ctx.email && !ctx.isAdmin) {
       throw new Error("본인 신청만 취소할 수 있습니다.");
     }
+    wasApproved = row.state === STATES.APPROVED;
     manager.cancel(id, ctx.email);
-    writeToLog(`App Cancelled: ${row.요청자}`);
+    SpreadsheetApp.flush();
   } finally {
     lock.releaseLock();
   }
-  return getBootstrap(token);
+  writeToLog(`App Cancelled: ${row.요청자}`);
+
+  // 승인됐던 휴가를 취소하면 사용 연차가 줄어듦 → 캐시 비우고 클라이언트가 백그라운드로 다시 조회
+  if (wasApproved) _invalidateBalance_();
+  return _bootstrap_(ctx, manager, { skipBalance: true, refresh: wasApproved });
 }
 
 // ========== Private ==========
@@ -173,9 +196,10 @@ function _decide_(token, id, state) {
   const ctx = _ctx_(token);
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
+  let manager, row;
   try {
-    const manager = new SheetManager(_getResponseSheet());
-    const row = manager.findById(id);
+    manager = new SheetManager(_getResponseSheet());
+    row = manager.findById(id);
     if (!row) throw new Error("해당 신청을 찾을 수 없습니다.");
 
     const approver = (Utils.extractEmail(row.승인자) || "").toLowerCase();
@@ -185,12 +209,15 @@ function _decide_(token, id, state) {
 
     if (state === STATES.APPROVED) manager.approve(id, ctx.email);
     else manager.deny(id, ctx.email);
-
-    writeToLog(`App ${state}: ${row.요청자}`);
+    SpreadsheetApp.flush();
   } finally {
     lock.releaseLock();
   }
-  return getBootstrap(token);
+  writeToLog(`App ${state}: ${row.요청자}`);
+
+  // 승인되면 신청자의 사용 연차가 바뀜 → 잔여 연차 캐시 비움 (승인자 본인 잔여 연차는 그대로)
+  if (state === STATES.APPROVED) _invalidateBalance_();
+  return _bootstrap_(ctx, manager, { skipBalance: true });
 }
 
 function _ctx_(token) {
@@ -199,8 +226,7 @@ function _ctx_(token) {
     .split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
   return {
     email,
-    isAdmin: !!email && admins.indexOf(email) >= 0,
-    manager: new SheetManager(_getResponseSheet())
+    isAdmin: !!email && admins.indexOf(email) >= 0
   };
 }
 
@@ -313,40 +339,64 @@ function _getApprovers_(rows, nameMap, myEmail) {
     .map(e => ({ email: e, label: nameMap[e] ? `${nameMap[e]} (${e})` : e }));
 }
 
-/** 연차계산 시트에서 잔여 연차 읽기 (시트 수식 결과를 그대로 사용) */
+const BALANCE_CACHE_KEY = "balances_v1";
+const BALANCE_CACHE_SEC = 600;      // 10분 (승인/취소 시 즉시 비움)
+const HOLIDAY_CACHE_SEC = 21600;    // 6시간
+
+/** 연차계산 시트에서 잔여 연차 읽기 (시트 수식 결과를 그대로 사용, 전 직원 표를 캐시) */
 function _getBalance_(name) {
   if (!name) return null;
+  const table = _balanceTable_();
+  return table[name] || null;
+}
+
+function _balanceTable_() {
+  const cache = CacheService.getScriptCache();
+  const cached = _json_(cache.get(BALANCE_CACHE_KEY));
+  if (cached) return cached;
+
+  const table = {};
   try {
-    const sh = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID).getSheetByName(CONFIG.SHEETS.BALANCE);
-    if (!sh) return null;
+    const sh = getSheet_(CONFIG.SHEETS.BALANCE);
+    if (!sh) return table;
     const values = sh.getDataRange().getValues();
     const hi = values.findIndex(r => r.some(v => String(v).trim() === "이름"));
-    if (hi < 0) return null;
+    if (hi < 0) return table;
 
     const h = values[hi].map(v => String(v).trim());
     const col = k => h.indexOf(k);
-    const r = values.slice(hi + 1).find(r => String(r[col("이름")]).trim() === name);
-    if (!r) return null;
-
     const num = v => (typeof v === "number" ? v : Number(v) || 0);
-    return {
-      joinDate: _fmt_(r[col("입사일")]),
-      tenure: String(r[col("근속년월일수")] || ""),
-      granted: num(r[col("발생연차")]),
-      used: num(r[col("사용연차")]),
-      remaining: num(r[col("사용가능연차")])
-    };
+    values.slice(hi + 1).forEach(r => {
+      const name = String(r[col("이름")] || "").trim();
+      if (!name) return;
+      table[name] = {
+        joinDate: _fmt_(r[col("입사일")]),
+        tenure: String(r[col("근속년월일수")] || ""),
+        granted: num(r[col("발생연차")]),
+        used: num(r[col("사용연차")]),
+        remaining: num(r[col("사용가능연차")])
+      };
+    });
+    cache.put(BALANCE_CACHE_KEY, JSON.stringify(table), BALANCE_CACHE_SEC);
   } catch (e) {
     Logger.log(`⚠️ 잔여연차 조회 실패: ${e.message}`);
-    return null;
   }
+  return table;
+}
+
+function _invalidateBalance_() {
+  try { CacheService.getScriptCache().remove(BALANCE_CACHE_KEY); } catch (e) {}
 }
 
 /** 데이터 시트의 공휴일 (E열 날짜, F열 이름) → { 'yyyy-MM-dd': '공휴일명' } */
 function _getHolidays_() {
+  const cache = CacheService.getScriptCache();
+  const cached = _json_(cache.get("holidays_v1"));
+  if (cached) return cached;
+
   const map = {};
   try {
-    const sh = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID).getSheetByName(CONFIG.SHEETS.HOLIDAYS);
+    const sh = getSheet_(CONFIG.SHEETS.HOLIDAYS);
     if (!sh || sh.getLastRow() < 3) return map;
     sh.getRange(3, 5, sh.getLastRow() - 2, 2).getValues().forEach(([v, name]) => {
       if (!(v instanceof Date)) return;
@@ -354,6 +404,7 @@ function _getHolidays_() {
       const label = name instanceof Date ? "신정" : String(name || "").trim();
       map[_fmt_(v)] = label || "공휴일";
     });
+    cache.put("holidays_v1", JSON.stringify(map), HOLIDAY_CACHE_SEC);
   } catch (e) {
     Logger.log(`⚠️ 공휴일 조회 실패: ${e.message}`);
   }

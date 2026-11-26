@@ -21,7 +21,18 @@ function doGet(e) {
   }
 
   if (!params.i) {
-    return HtmlService.createTemplateFromFile("Index")
+    const tpl = HtmlService.createTemplateFromFile("Index");
+    // 주소에 로그인 토큰(?t=)이 있으면 화면 데이터를 페이지에 미리 담아 보냄 → 추가 서버 왕복 없이 바로 표시
+    tpl.bootJson = "null";
+    if (params.t) {
+      try {
+        tpl.bootJson = JSON.stringify(getBootstrap(String(params.t)))
+          .replace(/</g, "\\u003c").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+      } catch (err) {
+        tpl.bootJson = "null";   // 토큰 만료 등 → 클라이언트가 평소처럼 처리
+      }
+    }
+    return tpl
       .evaluate()
       .setTitle("휴가 신청")
       .addMetaTag("viewport", "width=device-width, initial-scale=1, viewport-fit=cover")
@@ -71,7 +82,7 @@ function onFormSubmit(e) {
 
   try {
     // 트리거 환경에서 getActiveSpreadsheet()는 null을 반환할 수 있으므로 openById() 사용
-    const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+    const ss = getSpreadsheet_();
     const sheet = ss.getSheetByName(CONFIG.SHEETS.RESPONSES);
 
     if (!sheet) {
@@ -197,8 +208,7 @@ function debugRowKeys() {
  * 응답 시트 가져오기
  */
 function _getResponseSheet() {
-  const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
-  const sheet = ss.getSheetByName(CONFIG.SHEETS.RESPONSES);
+  const sheet = getSheet_(CONFIG.SHEETS.RESPONSES);
 
   if (!sheet) {
     throw new Error(`'${CONFIG.SHEETS.RESPONSES}' 시트를 찾을 수 없습니다.`);
