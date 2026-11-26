@@ -1,0 +1,52 @@
+name: Deploy to Google Apps Script
+
+# main 브랜치에 코드가 올라오면 Apps Script 에 자동 반영 + 기존 웹앱 배포를 새 버전으로 갱신
+on:
+  push:
+    branches: [main]
+    paths:
+      - "*.js"
+      - "*.html"
+      - "appsscript.json"
+      - ".clasp.json"
+      - ".github/workflows/deploy-apps-script.yml"
+  workflow_dispatch: {}
+
+concurrency:
+  group: apps-script-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      # 웹앱 URL(/macros/s/<배포ID>/exec)의 배포 ID. 이 배포를 갱신하므로 URL 이 바뀌지 않습니다.
+      DEPLOYMENT_ID: ${{ vars.DEPLOYMENT_ID || 'AKfycbzVg3ko1cP9ruzNhKiexTwrmqmEzkGG1myQRiz4X2h4-tmKlIPj1WEA-PE5wHfS4935EQ' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install clasp
+        run: npm install -g @google/clasp@2.4.2
+
+      - name: Write clasp credentials
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+        run: |
+          if [ -z "$CLASPRC_JSON" ]; then
+            echo "::error::GitHub 저장소 Secrets 에 CLASPRC_JSON 이 없습니다. README 의 '자동 배포 설정'을 참고하세요."
+            exit 1
+          fi
+          printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
+
+      - name: Push code to Apps Script
+        run: clasp push --force
+
+      - name: Update web app deployment
+        run: |
+          DESC="GitHub ${GITHUB_SHA::7} $(date -u +%Y-%m-%dT%H:%MZ)"
+          clasp deploy --deploymentId "$DEPLOYMENT_ID" --description "$DESC"
+          clasp deployments

@@ -33,6 +33,27 @@ Google Apps Script 기반 휴가 신청/승인 관리 시스템.
 | `LEAVE_TYPES` | 휴가 구분 목록 (기본: `연차,경조휴가,병가,공가,기타`) |
 | `ADMIN_EMAILS` | 모든 신청을 승인/취소할 수 있는 관리자 이메일 |
 
+## 🚀 자동 배포 (GitHub Actions)
+
+`main` 브랜치에 코드가 올라오면 `.github/workflows/deploy-apps-script.yml` 이 자동으로
+`clasp push` 후 **기존 웹앱 배포를 새 버전으로 갱신**합니다 (웹앱 URL 유지).
+Actions 탭 → "Deploy to Google Apps Script" → "Run workflow" 로 수동 실행도 가능합니다.
+
+### 최초 1회 설정
+
+1. https://script.google.com/home/usersettings 에서 **Google Apps Script API 사용** 을 켭니다.
+2. PC 에서 스크립트 소유자 계정으로 로그인합니다:
+   ```bash
+   npx @google/clasp@2.4.2 login
+   ```
+3. 생성된 `~/.clasprc.json` (Windows: `C:\Users\<사용자>\.clasprc.json`) 파일 내용을 전체 복사합니다.
+4. GitHub 저장소 → Settings → Secrets and variables → Actions → **New repository secret**
+   - Name: `CLASPRC_JSON`
+   - Secret: 3번에서 복사한 내용
+5. (선택) 배포 ID 가 바뀌면 같은 화면의 **Variables** 탭에 `DEPLOYMENT_ID` 를 추가합니다.
+
+> `.clasprc.json` 은 구글 계정 토큰이므로 저장소에 커밋하지 말고 Secret 으로만 넣으세요.
+
 ## 파일 구조
 
 | 파일 | 역할 |

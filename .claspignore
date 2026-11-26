@@ -1,0 +1,7 @@
+# Apps Script 로 올릴 파일만 허용
+**/**
+!*.js
+!*.html
+!appsscript.json
+.github/**
+node_modules/**
