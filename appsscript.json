@@ -25,6 +25,21 @@
     "https://www.googleapis.com/auth/admin.directory.user.readonly",
     "https://www.googleapis.com/auth/directory.readonly"
   ],
+  "addOns": {
+    "common": {
+      "name": "HR System",
+      "logoUrl": "https://your-domain.com/icon.png",
+      "homepageTrigger": {
+        "runFunction": "onHomepage",
+        "enabled": true
+      }
+    },
+    "sheets": {
+      "homepageTrigger": {
+        "runFunction": "onHomepage"
+      }
+    }
+  },
   "webapp": {
     "executeAs": "USER_DEPLOYING",
     "access": "ANYONE_ANONYMOUS"
