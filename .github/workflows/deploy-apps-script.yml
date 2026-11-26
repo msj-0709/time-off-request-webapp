@@ -43,6 +43,36 @@ jobs:
             exit 1
           fi
           printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
+          # 비밀값 형식 점검 (값은 출력하지 않음)
+          python3 - <<'PY'
+          import json, os, sys
+          p = os.path.expanduser("~/.clasprc.json")
+          raw = open(p, encoding="utf-8").read()
+          def fail(msg):
+              print(f"::error::CLASPRC_JSON 형식 오류: {msg} (길이 {len(raw)}자, 첫 글자 {raw[:1]!r}). 받은 파일 내용 전체를 그대로 다시 등록해 주세요.")
+              sys.exit(1)
+          try:
+              d = json.loads(raw)
+          except Exception as e:
+              fail(f"JSON 이 아님 - {type(e).__name__}. 일부만 복사됐거나 따옴표가 바뀌었을 수 있음")
+          if not isinstance(d, dict): fail("JSON 객체가 아님")
+          # clasp 3.x 로그인 파일 형식({"tokens": {"default": {...}}}) 이면 clasp 2.4.2 형식으로 변환
+          if "token" not in d and isinstance(d.get("tokens"), dict) and d["tokens"]:
+              t = d["tokens"].get("default") or next(iter(d["tokens"].values()))
+              if not t.get("refresh_token") or not t.get("client_id"):
+                  fail("clasp 3 형식이지만 refresh_token/client_id 가 없음")
+              d = {
+                  "token": {"refresh_token": t["refresh_token"], "token_type": "Bearer"},
+                  "oauth2ClientSettings": {"clientId": t["client_id"], "clientSecret": t.get("client_secret", ""), "redirectUri": "http://localhost"},
+                  "isLocalCreds": False,
+              }
+              open(p, "w", encoding="utf-8").write(json.dumps(d))
+              print("clasp 3 형식 로그인 파일을 clasp 2.4.2 형식으로 변환했습니다")
+          if "token" not in d: fail(f"'token' 항목 없음 (있는 항목: {sorted(d.keys())})")
+          if not d["token"].get("refresh_token"): fail("'token.refresh_token' 없음")
+          if not d.get("oauth2ClientSettings", {}).get("clientId"): fail("'oauth2ClientSettings.clientId' 없음")
+          print("CLASPRC_JSON 형식 정상")
+          PY
 
       - name: Push code to Apps Script
         run: clasp push --force
