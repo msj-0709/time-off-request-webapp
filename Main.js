@@ -27,7 +27,6 @@ function doGet(e) {
       .addMetaTag("viewport", "width=device-width, initial-scale=1, viewport-fit=cover")
       .addMetaTag("mobile-web-app-capable", "yes")
       .addMetaTag("apple-mobile-web-app-capable", "yes")
-      .addMetaTag("apple-mobile-web-app-title", "휴가신청")
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   }
 
