@@ -135,8 +135,7 @@ const CalendarService = {
 function onCalendarChange(e) {
   Logger.log("=== 캘린더 변경 감지 ===");
 
-  const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
-  const sheet = ss.getSheetByName(CONFIG.SHEETS.RESPONSES);
+  const sheet = getSheet_(CONFIG.SHEETS.RESPONSES);
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
 
   const eventIdCol = headers.findIndex(h => h.toString().includes('eventId')) + 1;

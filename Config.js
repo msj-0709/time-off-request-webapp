@@ -49,15 +49,40 @@ const STATES = {
 const EMAIL_REGEX = /[a-zA-Z+0-9\.-]+@[a-zA-Z0-9\.-]+/i;
 
 /**
- * __Settings 시트에서 설정값 로드
+ * 스프레드시트 객체 (한 번의 실행 안에서 재사용 → openById 반복 호출 방지)
+ */
+function getSpreadsheet_() {
+  if (!getSpreadsheet_.ss) getSpreadsheet_.ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  return getSpreadsheet_.ss;
+}
+
+/**
+ * 시트 가져오기 (실행 안에서 재사용)
+ */
+function getSheet_(name) {
+  const cache = getSheet_.cache || (getSheet_.cache = {});
+  if (!(name in cache)) cache[name] = getSpreadsheet_().getSheetByName(name);
+  return cache[name];
+}
+
+/** 설정 캐시 유지 시간(초). __Settings 시트 수정은 최대 이 시간 뒤 반영 */
+const SETTINGS_CACHE_SEC = 600;
+
+/**
+ * __Settings 시트에서 설정값 로드 (10분 캐시)
  */
 function loadSettings() {
+  try {
+    const cached = CacheService.getScriptCache().get("settings_v1");
+    if (cached) return JSON.parse(cached);
+  } catch (e) {
+    Logger.log(`설정 캐시 읽기 실패: ${e.message}`);
+  }
+
   const settings = {};
 
   try {
-    const sheet = SpreadsheetApp
-      .openById(CONFIG.SPREADSHEET_ID)
-      .getSheetByName(CONFIG.SHEETS.SETTINGS);
+    const sheet = getSheet_(CONFIG.SHEETS.SETTINGS);
 
     if (!sheet) {
       Logger.log(`⚠️ [loadSettings] '${CONFIG.SHEETS.SETTINGS}' 시트가 없습니다. 이메일 템플릿이 동작하지 않을 수 있습니다.`);
@@ -74,6 +99,12 @@ function loadSettings() {
       Logger.log(`⚠️ [loadSettings] '${CONFIG.SHEETS.SETTINGS}' 시트에 설정값이 없습니다.`);
     } else {
       Logger.log(`✅ [loadSettings] ${Object.keys(settings).length}개 설정값 로드 완료`);
+      try {
+        const json = JSON.stringify(settings);
+        if (json.length < 90000) CacheService.getScriptCache().put("settings_v1", json, SETTINGS_CACHE_SEC);
+      } catch (e) {
+        Logger.log(`설정 캐시 저장 실패: ${e.message}`);
+      }
     }
 
   } catch (e) {

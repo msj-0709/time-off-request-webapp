@@ -15,9 +15,17 @@ class SheetManager {
     this.sheet = sheet;
     this.REQUIRED_COLUMNS = ['state', 'actor', 'identifier', 'eventId', '휴가사유'];
     
-    this._ensureRequiredColumns();  // 필수 컬럼 자동 생성
-    this.headers = this._loadHeaders();
-    this.data = this._loadData();
+    // 시트 전체를 한 번에 읽어 헤더/데이터를 만든다 (왕복 호출 최소화)
+    let values = this._readAll();
+    if (this._ensureRequiredColumns(values[0] || [])) values = this._readAll();
+    this.headers = (values[0] || []).map(h => Utils.normalizeHeader(h));
+    this.data = values.slice(1).map((row, i) => {
+      const obj = { __row: i + 2 };
+      this.headers.forEach((key, j) => {
+        if (key) obj[key] = row[j];
+      });
+      return obj;
+    });
 
     Logger.log(`SheetManager 초기화 - ${this.data.length}행 로드됨`);
   }
@@ -71,8 +79,7 @@ class SheetManager {
     if (SETTINGS.CREATE_CALENDAR_EVENT == "1") {
       const eventId = CalendarService.createEvent(row);
       if (eventId) {
-        row.eventId = eventId;
-        this._saveEventId(row.__row, eventId);
+        row.eventId = eventId;   // 아래 _saveRow 에서 함께 저장
       }
     }
 
@@ -131,9 +138,9 @@ class SheetManager {
 
     const arr = this.headers.map(h => (h && row[h] !== undefined ? row[h] : ""));
     this.sheet.appendRow(arr);
-    SpreadsheetApp.flush();
 
-    row.__row = this.sheet.getLastRow();
+    // 락을 잡은 상태에서 읽은 마지막 행 다음 줄 (getLastRow 재호출 없이)
+    row.__row = this.data.length + 2;
     this.data.push(row);
     Logger.log(`📝 앱 신청 추가: ${row.__row}행`);
     return row;
@@ -192,21 +199,29 @@ class SheetManager {
   // ========== Private 메서드 ==========
 
   /**
-   * 필수 컬럼이 없으면 자동 생성
+   * 시트 전체 값 (1회 호출)
    */
-  _ensureRequiredColumns() {
-    const lastCol = this.sheet.getLastColumn();
-    const existingHeaders = lastCol > 0
-      ? this.sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(h => h.toString().trim())
-      : [];
+  _readAll() {
+    return this.sheet.getDataRange().getValues();
+  }
 
-    this.REQUIRED_COLUMNS.forEach(col => {
-      if (!existingHeaders.includes(col)) {
-        const newCol = this.sheet.getLastColumn() + 1;
-        this.sheet.getRange(1, newCol).setValue(col);
-        Logger.log(`✅ 컬럼 자동 생성: ${col}`);
-      }
+  /**
+   * 필수 컬럼이 없으면 자동 생성
+   *
+   * @param {Array} headerRow - 1행 값
+   * @returns {boolean} 컬럼을 추가했으면 true (다시 읽어야 함)
+   */
+  _ensureRequiredColumns(headerRow) {
+    const existingHeaders = headerRow.map(h => h.toString().trim());
+    const missing = this.REQUIRED_COLUMNS.filter(col => !existingHeaders.includes(col));
+    if (missing.length === 0) return false;
+
+    let newCol = this.sheet.getLastColumn() + 1;
+    missing.forEach(col => {
+      this.sheet.getRange(1, newCol++).setValue(col);
+      Logger.log(`✅ 컬럼 자동 생성: ${col}`);
     });
+    return true;
   }
 
   /**
@@ -272,7 +287,26 @@ class SheetManager {
     const stateCol = this.headers.indexOf("state") + 1;
     const actorCol = this.headers.indexOf("actor") + 1;
     const idCol = this.headers.indexOf("identifier") + 1;
+    const eventCol = this.headers.indexOf("eventId") + 1;
 
+    // 저장할 컬럼들이 서로 붙어 있으면 한 번에 쓰기 (왕복 호출 1회)
+    const fields = { state: row.state, actor: row.actor || "", identifier: row.identifier || "" };
+    if (row.eventId) fields.eventId = row.eventId;
+    const cols = Object.keys(fields).map(k => this.headers.indexOf(k) + 1);
+    if (cols.every(c => c > 0)) {
+      const min = Math.min.apply(null, cols), max = Math.max.apply(null, cols);
+      if (max - min + 1 === cols.length) {
+        const line = [];
+        for (let c = min; c <= max; c++) line.push(fields[this.headers[c - 1]]);
+        this.sheet.getRange(row.__row, min, 1, line.length).setValues([line]);
+        Logger.log(`시트 저장: ${row.__row}행, state=${row.state}`);
+        return;
+      }
+    }
+
+    if (row.eventId && eventCol) {
+      this.sheet.getRange(row.__row, eventCol).setValue(row.eventId);
+    }
     if (stateCol) {
       this.sheet.getRange(row.__row, stateCol).setValue(row.state);
     }

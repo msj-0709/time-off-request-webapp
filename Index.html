@@ -78,6 +78,11 @@
     .loading { position: fixed; inset: 0; z-index: 30; background: rgba(255,255,255,.7); display: none;
       align-items: center; justify-content: center; }
     .loading.show { display: flex; }
+    .topbar { position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 40; overflow: hidden; display: none; }
+    .topbar.show { display: block; }
+    .topbar::after { content: ""; position: absolute; top: 0; bottom: 0; width: 40%; background: var(--primary);
+      animation: slide 1s ease-in-out infinite; }
+    @keyframes slide { from { left: -40%; } to { left: 100%; } }
     .spinner { width: 36px; height: 36px; border: 4px solid var(--primary-weak); border-top-color: var(--primary);
       border-radius: 50%; animation: spin .8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
@@ -239,8 +244,11 @@
 
   <div class="toast" id="toast"></div>
   <div class="loading show" id="loading"><div class="spinner"></div></div>
+  <div class="topbar" id="topbar"></div>
 
 <script>
+  // 서버가 페이지에 미리 담아 보낸 화면 데이터 (주소에 로그인 토큰이 있을 때). 없으면 null
+  var BOOT = <?!= bootJson ?>;
   var STATE_LABEL = { PENDING: "승인 대기", APPROVED: "승인", DENIED: "반려", CANCELLED: "취소" };
   var data = null;
   var sel = { type: "연차", sub: "종일 연차" };
@@ -252,6 +260,8 @@
   function toast(msg) { var t = $("toast"); t.textContent = msg; t.classList.add("show");
     clearTimeout(toast._t); toast._t = setTimeout(function () { t.classList.remove("show"); }, 2800); }
   function loading(on) { $("loading").classList.toggle("show", on); }
+  var busy = 0;
+  function bg(on) { busy += on ? 1 : -1; if (busy < 0) busy = 0; $("topbar").classList.toggle("show", busy > 0); }
 
   // ---------- 로그인 토큰 ----------
   // 기기 저장소 + 페이지 주소(?t=) 두 곳에 보관.
@@ -270,16 +280,21 @@
     try { google.script.history.replace(null, t ? { t: t } : {}, ""); } catch (e) {}
   }
 
-  function run(fn, args, ok, fail) {
-    loading(true);
+  // opts.silent: 화면을 막지 않고 상단 진행 막대만 표시 (백그라운드 처리)
+  function run(fn, args, ok, fail, opts) {
+    var silent = opts && opts.silent;
+    var on = function () { silent ? bg(true) : loading(true); };
+    var off = function () { silent ? bg(false) : loading(false); };
+    on();
     var runner = google.script.run
-      .withSuccessHandler(function (res) { loading(false); ok && ok(res); })
+      .withSuccessHandler(function (res) { off(); ok && ok(res); })
       .withFailureHandler(function (err) {
-        loading(false);
+        off();
         var msg = String(err && err.message || err);
         if (msg.indexOf("AUTH_REQUIRED") >= 0) {
           var stored = localStorageGet("token");
           if (fn === "getBootstrap" && stored && stored !== args[0]) { memToken = stored; call("getBootstrap"); return; }
+          localStorageDel("snap");
           setToken(""); showLogin(); return;
         }
         if (fail) fail(msg); else toast("⚠️ " + msg);
@@ -288,12 +303,22 @@
   }
 
   // 로그인이 필요한 API 호출 (토큰을 첫 인자로 전달)
-  function call(fn, args, okMsg) {
+  function call(fn, args, okMsg, opts) {
     var t = getToken();
     run(fn, [t].concat(args || []), function (res) {
       if (fn === "getBootstrap") setToken(t);   // 유효 확인된 토큰을 저장소·주소에 반영
       if (res) render(res); if (okMsg) toast(okMsg);
-    });
+    }, opts && opts.fail, opts);
+  }
+
+  // 화면을 먼저 바꾸고(즉시 반영) 서버 처리는 백그라운드로. 실패하면 서버 데이터로 되돌림
+  function optimistic(fn, id, mutate, okMsg) {
+    if (data) { try { mutate(data); render(data); } catch (e) {} }
+    toast(okMsg);
+    call(fn, [id], null, { silent: true, fail: function (msg) {
+      toast("⚠️ " + msg);
+      call("getBootstrap", [], null, { silent: true });
+    } });
   }
 
   function showLogin() {
@@ -332,7 +357,11 @@
 
   // ---------- 렌더 ----------
   function render(res) {
+    // 쓰기 작업 응답은 잔여 연차를 생략함 → 기존 값 유지
+    if (res.keepBalance && data && data.balance && res.balance === undefined) res.balance = data.balance;
     data = res;
+    saveSnapshot(res);
+    if (res.refresh) { res.refresh = false; setTimeout(function () { call("getBootstrap", [], null, { silent: true }); }, 300); }
     holidaySet = {}; (res.holidays || []).forEach(function (h) { holidaySet[h] = true; });
 
     showApp();
@@ -504,6 +533,14 @@
   function localStorageSet(k, v) { try { localStorage.setItem("vac_" + k, v); } catch (e) {} }
   function localStorageDel(k) { try { localStorage.removeItem("vac_" + k); } catch (e) {} }
 
+  // 마지막 화면 데이터를 기기에 저장 → 다음에 열 때 즉시 표시하고 백그라운드로 최신화
+  function saveSnapshot(res) {
+    try { localStorageSet("snap", JSON.stringify({ t: getToken(), d: res })); } catch (e) {}
+  }
+  function loadSnapshot(t) {
+    try { var s = JSON.parse(localStorageGet("snap") || "null"); return s && s.t === t ? s.d : null; } catch (e) { return null; }
+  }
+
   // ---------- 이벤트 ----------
   document.querySelector("nav").addEventListener("click", function (ev) {
     var b = ev.target.closest("button"); if (!b) return;
@@ -538,9 +575,32 @@
 
   document.addEventListener("click", function (ev) {
     var t = ev.target;
-    if (t.dataset.approve && confirm("승인할까요?")) call("approveRequest", [t.dataset.approve], "승인되었습니다.");
-    if (t.dataset.deny && confirm("반려할까요?")) call("denyRequest", [t.dataset.deny], "반려되었습니다.");
-    if (t.dataset.cancel && confirm("이 신청을 취소할까요?")) call("cancelRequest", [t.dataset.cancel], "취소되었습니다.");
+    if (t.dataset.approve && confirm("승인할까요?")) {
+      var a = t.dataset.approve;
+      optimistic("approveRequest", a, function (d) {
+        var r = d.inbox.filter(function (x) { return x.id === a; })[0];
+        d.inbox = d.inbox.filter(function (x) { return x.id !== a; });
+        if (r) d.team.forEach(function (x) { if (x.name === r.name && x.start === r.start && x.end === r.end) x.state = "APPROVED"; });
+      }, "승인되었습니다.");
+    }
+    if (t.dataset.deny && confirm("반려할까요?")) {
+      var dn = t.dataset.deny;
+      optimistic("denyRequest", dn, function (d) {
+        var r = d.inbox.filter(function (x) { return x.id === dn; })[0];
+        d.inbox = d.inbox.filter(function (x) { return x.id !== dn; });
+        if (r) d.team = d.team.filter(function (x) { return !(x.name === r.name && x.start === r.start && x.end === r.end); });
+      }, "반려되었습니다.");
+    }
+    if (t.dataset.cancel && confirm("이 신청을 취소할까요?")) {
+      var c = t.dataset.cancel;
+      optimistic("cancelRequest", c, function (d) {
+        var r = d.mine.filter(function (x) { return x.id === c; })[0];
+        if (!r) return;
+        if (r.state === "PENDING" && r.type === "연차") d.pendingDays = Math.max(0, (d.pendingDays || 0) - r.days);
+        r.state = "CANCELLED";
+        d.team = d.team.filter(function (x) { return !(x.mine && x.start === r.start && x.end === r.end); });
+      }, "취소되었습니다.");
+    }
   });
 
   $("calPrev").addEventListener("click", function () { moveMonth(-1); });
@@ -588,10 +648,10 @@
   $("backBtn").addEventListener("click", function () { $("stepCode").classList.add("hidden"); $("stepEmail").classList.remove("hidden"); });
   document.addEventListener("click", function (ev) {
     if (ev.target.id === "logoutBtn" && confirm("로그아웃할까요?")) {
-      var t = getToken(); setToken(""); run("logout", [t], function () {}); showLogin();
+      var t = getToken(); setToken(""); localStorageDel("snap"); run("logout", [t], function () {}, null, { silent: true }); showLogin();
     }
     if (ev.target.id === "logoutAllBtn" && confirm("모든 기기(홈 화면 아이콘 포함)에서 로그아웃할까요?")) {
-      var t2 = getToken(); setToken("");
+      var t2 = getToken(); setToken(""); localStorageDel("snap");
       run("logoutAllDevices", [t2], function () { toast("모든 기기에서 로그아웃되었습니다."); }); showLogin();
     }
     if (ev.target.id === "tipClose") { localStorageSet("tipDone", "1"); $("homeTip").classList.add("hidden"); }
@@ -599,7 +659,15 @@
 
   // 시작: 주소(?t=, 홈 화면 아이콘) 토큰 → 기기 저장소 토큰 순으로 사용
   function start() {
-    if (getToken()) call("getBootstrap"); else { loading(false); showLogin(); }
+    var t = getToken();
+    if (!t) { loading(false); showLogin(); return; }
+    // 1) 서버가 페이지에 담아 보낸 데이터 → 추가 호출 없이 바로 표시
+    if (BOOT && BOOT.user) { loading(false); setToken(t); render(BOOT); BOOT = null; return; }
+    // 2) 기기에 저장된 마지막 화면 → 즉시 표시 후 백그라운드로 최신화
+    var snap = loadSnapshot(t);
+    if (snap && snap.user) { loading(false); render(snap); call("getBootstrap", [], null, { silent: true }); return; }
+    // 3) 처음 여는 기기
+    call("getBootstrap");
   }
   try {
     google.script.url.getLocation(function (loc) {
