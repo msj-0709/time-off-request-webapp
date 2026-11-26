@@ -239,13 +239,53 @@ function _leaveDays_(start, end, sub, holidays) {
   return count;
 }
 
-/** 이메일 → 이름 (가장 최근 신청 기준) */
+/**
+ * 이메일 → 이름
+ * 1) 회사 디렉터리(People API) 이름  2) 휴가 신청 이력의 요청자 이름 (우선)
+ * 신청 이력 이름을 우선하는 이유: 연차계산 시트의 이름과 일치해야 잔여 연차를 찾을 수 있음
+ */
 function _emailNameMap_(rows) {
-  const map = {};
+  const map = Object.assign({}, _directoryNames_());
   rows.forEach(r => {
     const email = String(r.이메일주소 || "").toLowerCase();
     if (email && r.요청자) map[email] = String(r.요청자).trim();
   });
+  return map;
+}
+
+/**
+ * 회사 디렉터리에서 이메일 → 이름 (6시간 캐시)
+ * People API 실패 시 빈 객체 (신청 이력 이름만 사용)
+ */
+function _directoryNames_() {
+  const cache = CacheService.getScriptCache();
+  const cached = _json_(cache.get("dir_names"));
+  if (cached) return cached;
+
+  const map = {};
+  try {
+    let pageToken = null;
+    do {
+      const params = {
+        readMask: "names,emailAddresses",
+        sources: ["DIRECTORY_SOURCE_TYPE_DOMAIN_PROFILE"],
+        pageSize: 1000
+      };
+      if (pageToken) params.pageToken = pageToken;
+      const res = People.People.listDirectoryPeople(params);
+      (res.people || []).forEach(p => {
+        const name = p.names && p.names[0] && p.names[0].displayName;
+        if (!name) return;
+        (p.emailAddresses || []).forEach(e => {
+          if (e.value) map[String(e.value).toLowerCase()] = String(name).trim();
+        });
+      });
+      pageToken = res.nextPageToken;
+    } while (pageToken);
+    cache.put("dir_names", JSON.stringify(map), 21600);
+  } catch (e) {
+    Logger.log(`⚠️ 디렉터리 이름 조회 실패: ${e.message}`);
+  }
   return map;
 }
 
