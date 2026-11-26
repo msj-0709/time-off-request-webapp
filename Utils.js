@@ -25,10 +25,11 @@ const Utils = {
    */
   processTemplate(template, data) {
     if (!template) return "";
+    const view = this.templateView(data);
 
     return template.replace(/\{\{(.*?)\}\}/g, (match, key) => {
       const cleanKey = key.trim().replace(/\s+/g, "");
-      const value = data[cleanKey];
+      const value = view[cleanKey];
 
       if (value instanceof Date) {
         return Utilities.formatDate(value, CONFIG.TIMEZONE, "yyyy-MM-dd");
@@ -36,6 +37,33 @@ const Utils = {
 
       return value !== undefined && value !== null ? value : match;
     });
+  },
+
+  /**
+   * 휴가 종류 표시용 이름
+   * 연차: 종일 → "연차", 반차 → "오전반차" / "오후반차"
+   * 그 외: 휴가구분 그대로 (경조휴가, 병가 등)
+   */
+  leaveLabel(row) {
+    const type = String((row && row.휴가구분) || "").trim();
+    const sub = String((row && row.연차구분) || "");
+    if (type === "연차") {
+      if (sub.indexOf("오전") >= 0) return "오전반차";
+      if (sub.indexOf("오후") >= 0) return "오후반차";
+    }
+    return type;
+  },
+
+  /**
+   * 템플릿 치환용 데이터 (원본 행은 변경하지 않음)
+   * - {{휴가종류}} : 연차 / 오전반차 / 오후반차 / 경조휴가 ...
+   * - {{휴가구분}} : 반차인 경우 "연차" 대신 "오전반차"/"오후반차" 로 표시
+   *   → __Settings 템플릿을 바꾸지 않아도 캘린더 제목·메일에 반차 구분이 나옴
+   */
+  templateView(row) {
+    if (!row) return {};
+    const label = this.leaveLabel(row);
+    return Object.assign({}, row, { 휴가종류: label, 휴가구분: label || row.휴가구분 });
   },
 
   /**
