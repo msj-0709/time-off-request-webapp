@@ -83,6 +83,11 @@
     @keyframes spin { to { transform: rotate(360deg); } }
     .hidden { display: none !important; }
     .install { font-size: 13px; color: var(--muted); }
+    .login { max-width: 420px; margin: 8vh auto 0; }
+    .login h2 { font-size: 20px; }
+    .code-input { font-size: 28px; letter-spacing: 10px; text-align: center; font-weight: 700; }
+    .linkbtn { background: none; border: 0; color: var(--primary); font-size: 14px; padding: 10px 0; cursor: pointer; font-family: inherit; }
+    header .who .linkbtn { font-size: 12px; padding: 2px 0 0; }
     .install summary { cursor: pointer; font-weight: 600; color: var(--text); }
   </style>
 </head>
@@ -93,8 +98,30 @@
   </header>
 
   <main>
+    <!-- 로그인 (구글 계정과 무관하게 회사 이메일 인증코드로 로그인) -->
+    <section id="tab-login" class="hidden">
+      <form class="card login" id="loginForm" autocomplete="on">
+        <h2>회사 이메일로 로그인</h2>
+        <div class="hint" style="margin-bottom:8px">입력한 이메일로 6자리 인증코드를 보내드립니다. 한 번 로그인하면 이 기기에서 계속 유지됩니다.</div>
+        <div id="stepEmail">
+          <label for="loginEmail">회사 이메일</label>
+          <input id="loginEmail" type="email" inputmode="email" autocomplete="email" autocapitalize="off" placeholder="name@j2db.co.kr" required>
+          <div style="height:14px"></div>
+          <button class="btn" type="submit" id="sendCodeBtn">인증코드 받기</button>
+        </div>
+        <div id="stepCode" class="hidden">
+          <label for="loginCode">인증코드 (메일 확인)</label>
+          <input id="loginCode" class="code-input" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]*" placeholder="······">
+          <div class="hint" id="codeHint"></div>
+          <div style="height:14px"></div>
+          <button class="btn" type="button" id="verifyBtn">로그인</button>
+          <button class="linkbtn" type="button" id="backBtn">← 이메일 다시 입력 / 코드 재발송</button>
+        </div>
+      </form>
+    </section>
+
     <!-- 신청 -->
-    <section id="tab-new">
+    <section id="tab-new" class="hidden">
       <div class="card" id="balanceCard"></div>
       <form class="card" id="form" autocomplete="off">
         <label for="name">이름</label>
@@ -154,7 +181,7 @@
     </section>
   </main>
 
-  <nav>
+  <nav id="nav" class="hidden">
     <button data-tab="new" class="on"><span class="ic">✏️</span>신청</button>
     <button data-tab="mine"><span class="ic">📋</span>내 휴가</button>
     <button data-tab="inbox" id="inboxTab"><span class="ic">✅</span>승인함<span class="dot hidden" id="inboxDot"></span></button>
@@ -177,12 +204,44 @@
     clearTimeout(toast._t); toast._t = setTimeout(function () { t.classList.remove("show"); }, 2800); }
   function loading(on) { $("loading").classList.toggle("show", on); }
 
-  function call(fn, args, okMsg) {
+  // ---------- 로그인 토큰 ----------
+  var memToken = "";
+  function getToken() { return localStorageGet("token") || memToken; }
+  function setToken(t) { memToken = t || ""; if (t) localStorageSet("token", t); else localStorageDel("token"); }
+
+  function run(fn, args, ok, fail) {
     loading(true);
     var runner = google.script.run
-      .withSuccessHandler(function (res) { loading(false); if (res) render(res); if (okMsg) toast(okMsg); })
-      .withFailureHandler(function (err) { loading(false); toast("⚠️ " + (err && err.message || err)); });
+      .withSuccessHandler(function (res) { loading(false); ok && ok(res); })
+      .withFailureHandler(function (err) {
+        loading(false);
+        var msg = String(err && err.message || err);
+        if (msg.indexOf("AUTH_REQUIRED") >= 0) { setToken(""); showLogin(); return; }
+        if (fail) fail(msg); else toast("⚠️ " + msg);
+      });
     runner[fn].apply(runner, args || []);
+  }
+
+  // 로그인이 필요한 API 호출 (토큰을 첫 인자로 전달)
+  function call(fn, args, okMsg) {
+    run(fn, [getToken()].concat(args || []), function (res) { if (res) render(res); if (okMsg) toast(okMsg); });
+  }
+
+  function showLogin() {
+    ["new", "mine", "inbox", "team"].forEach(function (t) { $("tab-" + t).classList.add("hidden"); });
+    $("nav").classList.add("hidden");
+    $("tab-login").classList.remove("hidden");
+    $("who").innerHTML = "";
+    $("stepEmail").classList.remove("hidden"); $("stepCode").classList.add("hidden");
+    $("loginEmail").value = localStorageGet("email");
+  }
+
+  function showApp() {
+    $("tab-login").classList.add("hidden");
+    $("nav").classList.remove("hidden");
+    var on = document.querySelector("nav button.on");
+    var tab = on ? on.dataset.tab : "new";
+    ["new", "mine", "inbox", "team"].forEach(function (t) { $("tab-" + t).classList.toggle("hidden", t !== tab); });
   }
 
   // ---------- 날짜 ----------
@@ -207,7 +266,9 @@
     data = res;
     holidaySet = {}; (res.holidays || []).forEach(function (h) { holidaySet[h] = true; });
 
-    $("who").innerHTML = esc(res.user.name || "") + "<br>" + esc(res.user.email || "로그인 필요");
+    showApp();
+    $("who").innerHTML = esc(res.user.name || "") + "<br>" + esc(res.user.email) +
+      '<br><button class="linkbtn" id="logoutBtn" type="button">로그아웃</button>';
     if (!$("name").value) $("name").value = res.user.name || "";
 
     renderBalance();
@@ -302,6 +363,7 @@
 
   function localStorageGet(k) { try { return localStorage.getItem("vac_" + k) || ""; } catch (e) { return ""; } }
   function localStorageSet(k, v) { try { localStorage.setItem("vac_" + k, v); } catch (e) {} }
+  function localStorageDel(k) { try { localStorage.removeItem("vac_" + k); } catch (e) {} }
 
   // ---------- 이벤트 ----------
   document.querySelector("nav").addEventListener("click", function (ev) {
@@ -342,7 +404,35 @@
     if (t.dataset.cancel && confirm("이 신청을 취소할까요?")) call("cancelRequest", [t.dataset.cancel], "취소되었습니다.");
   });
 
-  call("getBootstrap");
+  // ---------- 로그인 이벤트 ----------
+  $("loginForm").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var email = $("loginEmail").value.trim().toLowerCase();
+    if (!email) return;
+    run("requestLoginCode", [email], function () {
+      localStorageSet("email", email);
+      $("stepEmail").classList.add("hidden"); $("stepCode").classList.remove("hidden");
+      $("codeHint").textContent = email + " 으로 인증코드를 보냈습니다. (10분간 유효)";
+      $("loginCode").value = ""; $("loginCode").focus();
+    });
+  });
+  function verify() {
+    var code = $("loginCode").value.replace(/\D/g, "");
+    if (code.length !== 6) return toast("6자리 인증코드를 입력해 주세요.");
+    run("verifyLoginCode", [localStorageGet("email") || $("loginEmail").value, code], function (res) {
+      setToken(res.token); toast("로그인되었습니다."); call("getBootstrap");
+    });
+  }
+  $("verifyBtn").addEventListener("click", verify);
+  $("loginCode").addEventListener("input", function () { if (this.value.replace(/\D/g, "").length === 6) verify(); });
+  $("backBtn").addEventListener("click", function () { $("stepCode").classList.add("hidden"); $("stepEmail").classList.remove("hidden"); });
+  document.addEventListener("click", function (ev) {
+    if (ev.target.id === "logoutBtn" && confirm("로그아웃할까요?")) {
+      var t = getToken(); setToken(""); run("logout", [t], function () {}); showLogin();
+    }
+  });
+
+  if (getToken()) call("getBootstrap"); else { loading(false); showLogin(); }
 </script>
 </body>
 </html>

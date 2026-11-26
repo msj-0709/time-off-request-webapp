@@ -33,8 +33,8 @@ function doGet(e) {
 
   // 승인/반려 처리
   const { i: uuid, state } = params;
-  // 실제로 링크를 누른 사용자 (같은 도메인 로그인 시), 없으면 배포자
-  const user = Session.getActiveUser().getEmail() || Session.getEffectiveUser().getEmail();
+  // 구글 로그인 없이 열리는 웹앱이므로, 메일을 받은 승인자(행의 승인자 컬럼)를 처리자로 기록
+  const user = null;
 
   try {
     const lock = LockService.getScriptLock();

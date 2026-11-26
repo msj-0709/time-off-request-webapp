@@ -56,7 +56,7 @@ class SheetManager {
     
     // 상태 업데이트
     row.state = STATES.APPROVED;
-    row.actor = actorEmail;
+    row.actor = actorEmail || Utils.extractEmail(row.승인자) || "";
     
     // 연차구분 처리
     if (row.휴가구분 !== "연차") {
@@ -104,7 +104,7 @@ class SheetManager {
     
     // 상태 업데이트
     row.state = STATES.DENIED;
-    row.actor = actorEmail;
+    row.actor = actorEmail || Utils.extractEmail(row.승인자) || "";
     
     // 반려 메일 발송
     EmailService.sendDenialEmail(row);
@@ -169,7 +169,7 @@ class SheetManager {
     }
 
     row.state = STATES.CANCELLED;
-    row.actor = actorEmail;
+    row.actor = actorEmail || Utils.extractEmail(row.승인자) || "";
     EmailService.sendCancellationEmail(row);
     this._saveRow(row);
     Logger.log(`🚫 취소 완료: ${row.__row}행`);

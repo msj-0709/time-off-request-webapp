@@ -4,6 +4,7 @@
  * ============================================
  *
  * 클라이언트에서 google.script.run 으로 호출합니다.
+ * 모든 함수의 첫 인자는 로그인 토큰(Auth.js)입니다.
  * (이름이 '_' 로 끝나는 함수는 클라이언트에서 호출 불가)
  *
  * 주의: google.script.run 은 Date 객체를 반환할 수 없으므로
@@ -16,8 +17,8 @@ const DEFAULT_LEAVE_TYPES = "연차,경조휴가,병가,공가,기타";
 /**
  * 앱 최초 로딩 시 필요한 모든 데이터
  */
-function getBootstrap() {
-  const ctx = _ctx_();
+function getBootstrap(token) {
+  const ctx = _ctx_(token);
   const rows = ctx.manager.data;
   const holidays = _getHolidays_();
   const nameMap = _emailNameMap_(rows);
@@ -63,9 +64,8 @@ function getBootstrap() {
  * 휴가 신청
  * @param {object} form {name, approver, start, end, type, sub, reason}
  */
-function submitRequest(form) {
-  const ctx = _ctx_();
-  if (!ctx.email) throw new Error("로그인 정보를 확인할 수 없습니다. 회사 계정으로 로그인해 주세요.");
+function submitRequest(token, form) {
+  const ctx = _ctx_(token);
 
   const name = String(form.name || "").trim();
   const approver = Utils.extractEmail(form.approver);
@@ -129,17 +129,17 @@ function submitRequest(form) {
     lock.releaseLock();
   }
 
-  return getBootstrap();
+  return getBootstrap(token);
 }
 
 /** 승인 (앱 내 승인함) */
-function approveRequest(id) {
-  return _decide_(id, STATES.APPROVED);
+function approveRequest(token, id) {
+  return _decide_(token, id, STATES.APPROVED);
 }
 
 /** 반려 (앱 내 승인함) */
-function denyRequest(id) {
-  return _decide_(id, STATES.DENIED);
+function denyRequest(token, id) {
+  return _decide_(token, id, STATES.DENIED);
 }
 
 /**
@@ -147,8 +147,8 @@ function denyRequest(id) {
  * - PENDING: 바로 취소
  * - APPROVED: 휴가 시작 전이면 캘린더 일정 삭제 후 취소
  */
-function cancelRequest(id) {
-  const ctx = _ctx_();
+function cancelRequest(token, id) {
+  const ctx = _ctx_(token);
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
@@ -163,13 +163,13 @@ function cancelRequest(id) {
   } finally {
     lock.releaseLock();
   }
-  return getBootstrap();
+  return getBootstrap(token);
 }
 
 // ========== Private ==========
 
-function _decide_(id, state) {
-  const ctx = _ctx_();
+function _decide_(token, id, state) {
+  const ctx = _ctx_(token);
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
@@ -189,11 +189,11 @@ function _decide_(id, state) {
   } finally {
     lock.releaseLock();
   }
-  return getBootstrap();
+  return getBootstrap(token);
 }
 
-function _ctx_() {
-  const email = String(Session.getActiveUser().getEmail() || "").toLowerCase();
+function _ctx_(token) {
+  const email = _requireUser_(token);
   const admins = String(SETTINGS.ADMIN_EMAILS || "")
     .split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
   return {
