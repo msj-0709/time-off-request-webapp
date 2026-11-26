@@ -2,37 +2,45 @@
  * ============================================
  * Config.gs - 설정값 관리
  * ============================================
- * 
+ *
  * 모든 설정값을 한 곳에서 관리합니다.
- * 수정이 필요하면 이 파일만 수정하세요.
+ *
+ * [보안] SPREADSHEET_ID는 Apps Script 편집기 →
+ *        프로젝트 설정 → 스크립트 속성에서 관리합니다.
+ *        키: SPREADSHEET_ID, 값: 스프레드시트 ID
  */
 
 const CONFIG = {
-  // 스프레드시트 설정
-  SPREADSHEET_ID: "1rQVXmDmWGFQ2j0LvSBxiJMXEVlWJBhaFaqSpcP2tVME",
-  
+  // [보안] PropertiesService에서 로드. 미설정 시 fallback 사용
+  SPREADSHEET_ID: PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID')
+    || "1rQVXmDmWGFQ2j0LvSBxiJMXEVlWJBhaFaqSpcP2tVME",
+
   // 시트 이름
   SHEETS: {
     RESPONSES: "휴가요청내역",
     LOG: "Execution Log",
-    SETTINGS: "__Settings"
+    SETTINGS: "__Settings",
+    BALANCE: "연차계산",
+    HOLIDAYS: "데이터"
   },
-  
+
   // 시간대
   TIMEZONE: "Asia/Seoul",
-  
+
   // 웹앱 URL (배포 후 업데이트 필요)
   WEB_APP_URL: "https://script.google.com/macros/s/AKfycbzVg3ko1cP9ruzNhKiexTwrmqmEzkGG1myQRiz4X2h4-tmKlIPj1WEA-PE5wHfS4935EQ/exec",
-  
+
   // 구글 폼 URL
-  GOOGLE_FORM_URL: "https://docs.google.com/forms/d/e/1FAIpQLScS7vrwfVSWSnJazy9_aHpPTdnOJvNH6TIX6EW8l-SDVk_7pw/viewform"
+  GOOGLE_FORM_URL: "https://docs.google.com/forms/d/e/1FAIpQLScS7vrwfVSWSnJazy9_aHpPTdnOJvNH6TIX6EW8l-SDVk_7pw/viewform",
+
+  // 전사 공지 발송 도메인
+  ANNOUNCEMENT_DOMAIN: "j2db.co.kr"
 };
 
 // 상태값 정의
-
 const STATES = {
   PENDING: "PENDING",
-  APPROVED: "APPROVED", 
+  APPROVED: "APPROVED",
   DENIED: "DENIED",
   CANCELLED: "CANCELLED"
 };
@@ -45,22 +53,33 @@ const EMAIL_REGEX = /[a-zA-Z+0-9\.-]+@[a-zA-Z0-9\.-]+/i;
  */
 function loadSettings() {
   const settings = {};
-  
+
   try {
     const sheet = SpreadsheetApp
       .openById(CONFIG.SPREADSHEET_ID)
       .getSheetByName(CONFIG.SHEETS.SETTINGS);
-    
+
+    if (!sheet) {
+      Logger.log(`⚠️ [loadSettings] '${CONFIG.SHEETS.SETTINGS}' 시트가 없습니다. 이메일 템플릿이 동작하지 않을 수 있습니다.`);
+      return settings;
+    }
+
     const data = sheet.getDataRange().getValues();
-    
+
     data.slice(1).forEach(row => {
       if (row[0]) settings[row[0]] = row[1];
     });
-    
+
+    if (Object.keys(settings).length === 0) {
+      Logger.log(`⚠️ [loadSettings] '${CONFIG.SHEETS.SETTINGS}' 시트에 설정값이 없습니다.`);
+    } else {
+      Logger.log(`✅ [loadSettings] ${Object.keys(settings).length}개 설정값 로드 완료`);
+    }
+
   } catch (e) {
     Logger.log(`⚠️ 설정 로드 실패: ${e.message}`);
   }
-  
+
   return settings;
 }
 
