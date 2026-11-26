@@ -20,8 +20,10 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
-      # 웹앱 URL(/macros/s/<배포ID>/exec)의 배포 ID. 이 배포를 갱신하므로 URL 이 바뀌지 않습니다.
-      DEPLOYMENT_ID: ${{ vars.DEPLOYMENT_ID || 'AKfycbzVg3ko1cP9ruzNhKiexTwrmqmEzkGG1myQRiz4X2h4-tmKlIPj1WEA-PE5wHfS4935EQ' }}
+      # 갱신할 배포 ID 목록 (공백 구분). 배포를 갱신하므로 URL 이 바뀌지 않습니다.
+      # - AKfycbzVg3ko… : 웹앱 주소 (메일 승인 링크, CONFIG.WEB_APP_URL)
+      # - AKfycbxO1ngx… : 구글 앱 런처 "연차 신청" 아이콘
+      DEPLOYMENT_IDS: ${{ vars.DEPLOYMENT_IDS || 'AKfycbzVg3ko1cP9ruzNhKiexTwrmqmEzkGG1myQRiz4X2h4-tmKlIPj1WEA-PE5wHfS4935EQ AKfycbxO1ngxRLytkNK587dyOyMyW6VjHP_U3IFLF20zIb6_jd1FtXxu9Yqo5_XEzIZ8H48k3g' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -45,8 +47,14 @@ jobs:
       - name: Push code to Apps Script
         run: clasp push --force
 
-      - name: Update web app deployment
+      - name: Create version and update deployments
         run: |
           DESC="GitHub ${GITHUB_SHA::7} $(date -u +%Y-%m-%dT%H:%MZ)"
-          clasp deploy --deploymentId "$DEPLOYMENT_ID" --description "$DESC"
-          clasp deployments
+          OUT=$(clasp version "$DESC")
+          echo "$OUT"
+          V=$(echo "$OUT" | grep -o 'version [0-9]*' | grep -o '[0-9]*')
+          if [ -z "$V" ]; then echo "::error::버전 생성 실패"; exit 1; fi
+          for ID in $DEPLOYMENT_IDS; do
+            clasp deploy --deploymentId "$ID" --versionNumber "$V" --description "$DESC"
+          done
+          clasp deployments | grep -E "$(echo $DEPLOYMENT_IDS | tr ' ' '|')"

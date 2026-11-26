@@ -59,7 +59,8 @@ Actions 탭 → "Deploy to Google Apps Script" → "Run workflow" 로 수동 실
 4. GitHub 저장소 → Settings → Secrets and variables → Actions → **New repository secret**
    - Name: `CLASPRC_JSON`
    - Secret: 3번에서 복사한 내용
-5. (선택) 배포 ID 가 바뀌면 같은 화면의 **Variables** 탭에 `DEPLOYMENT_ID` 를 추가합니다.
+5. (선택) 갱신할 배포가 바뀌면 같은 화면의 **Variables** 탭에 `DEPLOYMENT_IDS` (공백 구분 배포 ID 목록)를 추가합니다.
+   기본값: 웹앱 주소 배포 + 구글 앱 런처 "연차 신청" 아이콘 배포
 
 > `.clasprc.json` 은 구글 계정 토큰이므로 저장소에 커밋하지 말고 Secret 으로만 넣으세요.
 
