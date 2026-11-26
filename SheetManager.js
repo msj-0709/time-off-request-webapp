@@ -13,7 +13,7 @@ class SheetManager {
    */
   constructor(sheet) {
     this.sheet = sheet;
-    this.REQUIRED_COLUMNS = ['state', 'actor', 'identifier', 'eventId'];
+    this.REQUIRED_COLUMNS = ['state', 'actor', 'identifier', 'eventId', '휴가사유'];
     
     this._ensureRequiredColumns();  // 필수 컬럼 자동 생성
     this.headers = this._loadHeaders();
@@ -62,7 +62,7 @@ class SheetManager {
     if (row.휴가구분 !== "연차") {
       row.연차구분 = "해당 없음";
     } else {
-      row.연차구분 = row.연차구분 || "종일연차";
+      row.연차구분 = row.연차구분 || "종일 연차";
     }
     
     // 승인 메일 발송
@@ -72,6 +72,7 @@ class SheetManager {
     if (SETTINGS.CREATE_CALENDAR_EVENT == "1") {
       const eventId = CalendarService.createEvent(row);
       if (eventId) {
+        row.eventId = eventId;
         this._saveEventId(row.__row, eventId);
       }
     }
@@ -114,8 +115,68 @@ class SheetManager {
     Logger.log(`❌ 반려 완료: ${row.__row}행`);
   }
   
+  /**
+   * 앱에서 신청한 휴가를 새 행으로 추가 (PENDING 상태)
+   *
+   * @param {object} values - 정규화된 헤더명 → 값
+   * @returns {object} 추가된 행 데이터
+   */
+  appendRequest(values) {
+    const row = Object.assign({
+      타임스탬프: new Date(),
+      state: STATES.PENDING,
+      identifier: Utils.generateUUID(),
+      actor: "",
+      eventId: ""
+    }, values);
+
+    const arr = this.headers.map(h => (h && row[h] !== undefined ? row[h] : ""));
+    this.sheet.appendRow(arr);
+    SpreadsheetApp.flush();
+
+    row.__row = this.sheet.getLastRow();
+    this.data.push(row);
+    Logger.log(`📝 앱 신청 추가: ${row.__row}행`);
+    return row;
+  }
+
+  /**
+   * identifier 로 행 찾기
+   */
+  findById(uuid) {
+    return this._findByUuid(uuid);
+  }
+
+  /**
+   * 취소 처리
+   * - PENDING: 바로 취소
+   * - APPROVED: 휴가 시작 전이면 캘린더 일정 삭제 후 취소
+   */
+  cancel(uuid, actorEmail) {
+    const row = this._findByUuid(uuid);
+    if (!row) throw new Error("해당 데이터를 찾을 수 없습니다.");
+
+    if (row.state === STATES.APPROVED) {
+      const start = Utils.toDate(row.휴가시작일자);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      if (!start || start < today) {
+        throw new Error("이미 시작된 휴가는 취소할 수 없습니다. 관리자에게 문의하세요.");
+      }
+      if (row.eventId) CalendarService.deleteEvent(row);
+    } else if (row.state !== STATES.PENDING) {
+      throw new Error("대기 또는 승인 상태의 신청만 취소할 수 있습니다.");
+    }
+
+    row.state = STATES.CANCELLED;
+    row.actor = actorEmail;
+    EmailService.sendCancellationEmail(row);
+    this._saveRow(row);
+    Logger.log(`🚫 취소 완료: ${row.__row}행`);
+  }
+
   // ========== Private 메서드 ==========
-  
+
   /**
    * 필수 컬럼이 없으면 자동 생성
    */

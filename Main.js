@@ -8,36 +8,56 @@
 
 /**
  * 웹앱 진입점 (GET 요청)
- * 
- * - 파라미터 없음: 구글 폼으로 리다이렉트
- * - 파라미터 있음: 승인/반려 처리
+ *
+ * - 파라미터 없음: 휴가 관리 앱(Index.html) 표시
+ * - ?form=1      : 기존 구글 폼으로 리다이렉트 (fallback)
+ * - ?i=&state=   : 메일 링크를 통한 승인/반려 처리
  */
 function doGet(e) {
-  // 파라미터 없으면 구글 폼으로 이동
-  if (!e.parameter || !e.parameter.i) {
+  const params = (e && e.parameter) || {};
+
+  if (params.form) {
     return createRedirectPage(CONFIG.GOOGLE_FORM_URL);
   }
-  
+
+  if (!params.i) {
+    return HtmlService.createTemplateFromFile("Index")
+      .evaluate()
+      .setTitle("휴가 신청")
+      .addMetaTag("viewport", "width=device-width, initial-scale=1, viewport-fit=cover")
+      .addMetaTag("mobile-web-app-capable", "yes")
+      .addMetaTag("apple-mobile-web-app-capable", "yes")
+      .addMetaTag("apple-mobile-web-app-title", "휴가신청")
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  }
+
   // 승인/반려 처리
-  const { i: uuid, state } = e.parameter;
-  const user = Session.getEffectiveUser().getEmail();
-  
+  const { i: uuid, state } = params;
+  // 실제로 링크를 누른 사용자 (같은 도메인 로그인 시), 없으면 배포자
+  const user = Session.getActiveUser().getEmail() || Session.getEffectiveUser().getEmail();
+
   try {
-    const sheet = _getResponseSheet();
-    const manager = new SheetManager(sheet);
-    
-    if (state === STATES.APPROVED) {
-      manager.approve(uuid, user);
-      return createApprovalPage('✅', '승인이 완료되었습니다', '#1e8e3e');
-      
-    } else if (state === STATES.DENIED) {
-      manager.deny(uuid, user);
-      return createApprovalPage('❌', '반려 처리가 완료되었습니다', '#d93025');
-      
-    } else {
-      throw new Error("잘못된 요청 상태입니다.");
+    const lock = LockService.getScriptLock();
+    lock.waitLock(20000);
+    try {
+      const sheet = _getResponseSheet();
+      const manager = new SheetManager(sheet);
+
+      if (state === STATES.APPROVED) {
+        manager.approve(uuid, user);
+        return createApprovalPage('✅', '승인이 완료되었습니다', '#1e8e3e');
+
+      } else if (state === STATES.DENIED) {
+        manager.deny(uuid, user);
+        return createApprovalPage('❌', '반려 처리가 완료되었습니다', '#d93025');
+
+      } else {
+        throw new Error("잘못된 요청 상태입니다.");
+      }
+    } finally {
+      lock.releaseLock();
     }
-    
+
   } catch (err) {
     Logger.log(`❌ 에러: ${err.message}`);
     return createErrorPage(err.message);

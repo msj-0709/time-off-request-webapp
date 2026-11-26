@@ -65,10 +65,8 @@ function createApprovalPage(icon, message, color) {
       <div class="alert-box">
         <div class="icon">${icon}</div>
         <div class="message">${message}</div>
+        <p><a href="${CONFIG.WEB_APP_URL}" target="_top" style="color:#1a73e8">휴가 앱 열기</a></p>
       </div>
-      <script>
-        setTimeout(() => window.close(), 3000);
-      </script>
     </body>
     </html>
   `);

@@ -91,6 +91,24 @@ const CalendarService = {
     return !found;
   },
   
+  /**
+   * 캘린더 이벤트 삭제 (승인된 휴가 취소 시)
+   *
+   * @param {object} row - 행 데이터 (eventId 포함)
+   */
+  deleteEvent(row) {
+    try {
+      const calendar = this._getCalendar(row);
+      const event = calendar && calendar.getEventById(row.eventId);
+      if (event) {
+        event.deleteEvent();
+        Logger.log(`🗑️ 캘린더 이벤트 삭제: ${row.eventId}`);
+      }
+    } catch (e) {
+      Logger.log(`⚠️ 캘린더 이벤트 삭제 실패: ${e.message}`);
+    }
+  },
+
   // ========== Private 메서드 ==========
   
   /**

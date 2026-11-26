@@ -15,7 +15,9 @@ const CONFIG = {
   SHEETS: {
     RESPONSES: "휴가요청내역",
     LOG: "Execution Log",
-    SETTINGS: "__Settings"
+    SETTINGS: "__Settings",
+    BALANCE: "연차계산",
+    HOLIDAYS: "데이터"
   },
   
   // 시간대
