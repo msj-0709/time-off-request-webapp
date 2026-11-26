@@ -8,6 +8,9 @@
  *
  * - 인증코드: CacheService (10분 유효, 5회 실패 시 폐기, 60초 재발송 제한)
  * - 세션: PropertiesService 에 토큰 해시만 저장 (원본 토큰은 사용자 기기에만 존재)
+ * - 사용할 때마다 유효기간 자동 연장 (하루 1회 갱신) → 자주 쓰면 로그인이 풀리지 않음
+ * - 클라이언트는 토큰을 기기 저장소 + 페이지 주소(?t=)에 함께 보관
+ *   → 홈 화면에 추가하면 아이콘 주소에 토큰이 포함되어, 아이폰 저장소가 지워져도 로그인 유지
  *
  * __Settings (선택)
  *   ALLOWED_EMAIL_DOMAINS : 로그인 허용 도메인 (쉼표 구분, 기본 j2db.co.kr)
@@ -111,10 +114,40 @@ function _requireUser_(token) {
     const props = PropertiesService.getScriptProperties();
     const key = AUTH.SESSION_PREFIX + _sha256_(String(token));
     const sess = _json_(props.getProperty(key));
-    if (sess && sess.exp > Date.now() && _isAllowedEmail_(sess.email)) return sess.email;
+    if (sess && sess.exp > Date.now() && _isAllowedEmail_(sess.email)) {
+      _renewSession_(props, key, sess);
+      return sess.email;
+    }
     if (sess) props.deleteProperty(key);
   }
   throw new Error("AUTH_REQUIRED");
+}
+
+/**
+ * 사용 시 유효기간 연장 (속성 쓰기를 줄이기 위해 하루에 한 번만)
+ */
+function _renewSession_(props, key, sess) {
+  const days = Number(SETTINGS.SESSION_DAYS) || AUTH.DEFAULT_SESSION_DAYS;
+  const newExp = Date.now() + days * 86400000;
+  if (newExp - sess.exp < 86400000) return;
+  sess.exp = newExp;
+  try { props.setProperty(key, JSON.stringify(sess)); } catch (e) { Logger.log(`세션 연장 실패: ${e.message}`); }
+}
+
+/**
+ * 모든 기기에서 로그아웃 (클라이언트 호출) - 홈 화면 아이콘 주소가 유출됐을 때 사용
+ */
+function logoutAllDevices(token) {
+  const email = _requireUser_(token);
+  const props = PropertiesService.getScriptProperties();
+  const all = props.getProperties();
+  Object.keys(all).forEach(k => {
+    if (k.indexOf(AUTH.SESSION_PREFIX) !== 0) return;
+    const s = _json_(all[k]);
+    if (!s || s.email === email) props.deleteProperty(k);
+  });
+  writeToLog(`Logout all devices: ${email}`);
+  return { ok: true };
 }
 
 function _isAllowedEmail_(email) {

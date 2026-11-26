@@ -83,6 +83,8 @@
     @keyframes spin { to { transform: rotate(360deg); } }
     .hidden { display: none !important; }
     .install { font-size: 13px; color: var(--muted); }
+    .tip { background: var(--primary-weak); }
+    .tip .hint { margin-top: 4px; }
     .login { max-width: 420px; margin: 8vh auto 0; }
     .login h2 { font-size: 20px; }
     .code-input { font-size: 28px; letter-spacing: 10px; text-align: center; font-weight: 700; }
@@ -122,6 +124,12 @@
 
     <!-- 신청 -->
     <section id="tab-new" class="hidden">
+      <div class="card tip hidden" id="homeTip">
+        <b>📱 홈 화면에 추가해 두세요</b>
+        <div class="hint">지금 추가하면 아이콘으로 열 때 로그인 없이 바로 열립니다.<br>
+          아이폰: Safari 하단 공유(□↑) → "홈 화면에 추가"<br>안드로이드: Chrome ⋮ → "홈 화면에 추가"</div>
+        <button class="linkbtn" id="tipClose" type="button">닫기</button>
+      </div>
       <div class="card" id="balanceCard"></div>
       <form class="card" id="form" autocomplete="off">
         <label for="name">이름</label>
@@ -176,6 +184,9 @@
           <summary>📱 휴대폰 홈 화면에 앱처럼 추가하기</summary>
           <p><b>아이폰(Safari)</b>: 하단 공유 버튼(□↑) → "홈 화면에 추가"</p>
           <p><b>안드로이드(Chrome)</b>: 우측 상단 ⋮ → "홈 화면에 추가"</p>
+          <p>로그인한 상태에서 추가하면 아이콘에 로그인 정보가 함께 저장되어 바로 열립니다.
+            휴대폰을 잃어버렸거나 아이콘 주소가 다른 사람에게 전달됐다면 아래 버튼을 눌러 주세요.</p>
+          <button class="btn ghost sm" id="logoutAllBtn" type="button">모든 기기에서 로그아웃</button>
         </details>
       </div>
     </section>
@@ -205,9 +216,21 @@
   function loading(on) { $("loading").classList.toggle("show", on); }
 
   // ---------- 로그인 토큰 ----------
-  var memToken = "";
-  function getToken() { return localStorageGet("token") || memToken; }
-  function setToken(t) { memToken = t || ""; if (t) localStorageSet("token", t); else localStorageDel("token"); }
+  // 기기 저장소 + 페이지 주소(?t=) 두 곳에 보관.
+  // 주소에 토큰이 있으므로 '홈 화면에 추가' 시 아이콘에 로그인 정보가 함께 저장되어,
+  // 아이폰이 저장소를 지워도 아이콘으로 열면 로그인 상태가 유지됨.
+  var memToken = "", urlToken = "";
+  function getToken() { return memToken || localStorageGet("token"); }
+  function setToken(t) {
+    memToken = t || "";
+    if (t) localStorageSet("token", t); else localStorageDel("token");
+    syncUrl(t);
+  }
+  function syncUrl(t) {
+    if (t === urlToken) return;
+    urlToken = t || "";
+    try { google.script.history.replace(null, t ? { t: t } : {}, ""); } catch (e) {}
+  }
 
   function run(fn, args, ok, fail) {
     loading(true);
@@ -216,7 +239,11 @@
       .withFailureHandler(function (err) {
         loading(false);
         var msg = String(err && err.message || err);
-        if (msg.indexOf("AUTH_REQUIRED") >= 0) { setToken(""); showLogin(); return; }
+        if (msg.indexOf("AUTH_REQUIRED") >= 0) {
+          var stored = localStorageGet("token");
+          if (fn === "getBootstrap" && stored && stored !== args[0]) { memToken = stored; call("getBootstrap"); return; }
+          setToken(""); showLogin(); return;
+        }
         if (fail) fail(msg); else toast("⚠️ " + msg);
       });
     runner[fn].apply(runner, args || []);
@@ -224,7 +251,11 @@
 
   // 로그인이 필요한 API 호출 (토큰을 첫 인자로 전달)
   function call(fn, args, okMsg) {
-    run(fn, [getToken()].concat(args || []), function (res) { if (res) render(res); if (okMsg) toast(okMsg); });
+    var t = getToken();
+    run(fn, [t].concat(args || []), function (res) {
+      if (fn === "getBootstrap") setToken(t);   // 유효 확인된 토큰을 저장소·주소에 반영
+      if (res) render(res); if (okMsg) toast(okMsg);
+    });
   }
 
   function showLogin() {
@@ -269,6 +300,7 @@
     showApp();
     $("who").innerHTML = esc(res.user.name || "") + "<br>" + esc(res.user.email) +
       '<br><button class="linkbtn" id="logoutBtn" type="button">로그아웃</button>';
+    $("homeTip").classList.toggle("hidden", !!localStorageGet("tipDone"));
     if (!$("name").value) $("name").value = res.user.name || "";
 
     renderBalance();
@@ -430,9 +462,24 @@
     if (ev.target.id === "logoutBtn" && confirm("로그아웃할까요?")) {
       var t = getToken(); setToken(""); run("logout", [t], function () {}); showLogin();
     }
+    if (ev.target.id === "logoutAllBtn" && confirm("모든 기기(홈 화면 아이콘 포함)에서 로그아웃할까요?")) {
+      var t2 = getToken(); setToken("");
+      run("logoutAllDevices", [t2], function () { toast("모든 기기에서 로그아웃되었습니다."); }); showLogin();
+    }
+    if (ev.target.id === "tipClose") { localStorageSet("tipDone", "1"); $("homeTip").classList.add("hidden"); }
   });
 
-  if (getToken()) call("getBootstrap"); else { loading(false); showLogin(); }
+  // 시작: 주소(?t=, 홈 화면 아이콘) 토큰 → 기기 저장소 토큰 순으로 사용
+  function start() {
+    if (getToken()) call("getBootstrap"); else { loading(false); showLogin(); }
+  }
+  try {
+    google.script.url.getLocation(function (loc) {
+      var t = loc && loc.parameter && loc.parameter.t;
+      if (t) { urlToken = t; memToken = t; }
+      start();
+    });
+  } catch (e) { start(); }
 </script>
 </body>
 </html>

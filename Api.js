@@ -119,8 +119,7 @@ function submitRequest(token, form) {
       휴가사유: String(form.reason || "").trim()
     });
 
-    row.approvalurl = `${CONFIG.WEB_APP_URL}?i=${row.identifier}&state=${STATES.APPROVED}`;
-    row.denyurl = `${CONFIG.WEB_APP_URL}?i=${row.identifier}&state=${STATES.DENIED}`;
+    Object.assign(row, SheetManager._buildApprovalUrls(row.identifier));
     row.appurl = CONFIG.WEB_APP_URL;
     EmailService.sendPendingEmail(row);
 

@@ -2,7 +2,7 @@
  * ============================================
  * Main.gs - 메인 진입점
  * ============================================
- * 
+ *
  * 외부에서 호출되는 함수들 (트리거, 웹앱 등)
  */
 
@@ -69,12 +69,12 @@ function doGet(e) {
  */
 function onFormSubmit(e) {
   Logger.log("=== 폼 제출 처리 시작 ===");
-  
+
   try {
-    // 트리거에서는 getActiveSpreadsheet() 사용
-    const ss = SpreadsheetApp.getActiveSpreadsheet() || SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+    // 트리거 환경에서 getActiveSpreadsheet()는 null을 반환할 수 있으므로 openById() 사용
+    const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
     const sheet = ss.getSheetByName(CONFIG.SHEETS.RESPONSES);
-    
+
     if (!sheet) {
       throw new Error(`'${CONFIG.SHEETS.RESPONSES}' 시트를 찾을 수 없습니다.`);
     }
@@ -94,12 +94,11 @@ function onFormSubmit(e) {
 
     const lastRow = sheet.getLastRow();
     const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-    
-    // 이메일 자동 입력 (폼에서 수집된 이메일)
+
+    // 이메일 자동 입력
     const emailCol = headers.findIndex(h => h.toString().includes('이메일')) + 1;
     let email = null;
-    
-    // 폼 응답에서 이메일 가져오기
+
     if (e && e.response) {
       email = e.response.getRespondentEmail();
     } else if (e && e.namedValues && e.namedValues['이메일 주소']) {
@@ -107,18 +106,17 @@ function onFormSubmit(e) {
     } else {
       email = Session.getActiveUser().getEmail();
     }
-    
+
     if (emailCol && email && !sheet.getRange(lastRow, emailCol).getValue()) {
       sheet.getRange(lastRow, emailCol).setValue(email);
       Logger.log(`이메일 자동 입력: ${email}`);
     }
-    
-    // 신규 항목 처리 (PENDING으로 변경 + 승인자에게 메일)
+
     new SheetManager(sheet).processNewEntries();
-    
+
     writeToLog("Form Submitted");
     Logger.log("=== 폼 제출 처리 완료 ===");
-    
+
   } catch (err) {
     Logger.log(`❌ 폼 제출 에러: ${err.message}`);
     Logger.log(err.stack);
@@ -157,8 +155,10 @@ function resendPendingEmails() {
   }
 
   targets.forEach(row => {
-    row.approvalurl = `${CONFIG.WEB_APP_URL}?i=${row.identifier}&state=${STATES.APPROVED}`;
-    row.denyurl    = `${CONFIG.WEB_APP_URL}?i=${row.identifier}&state=${STATES.DENIED}`;
+    // URL 생성 (SheetManager static 메서드로 단일화)
+    const urls = SheetManager._buildApprovalUrls(row.identifier);
+    row.approvalurl = urls.approvalurl;
+    row.denyurl = urls.denyurl;
 
     try {
       EmailService.sendPendingEmail(row);
@@ -169,6 +169,29 @@ function resendPendingEmails() {
   });
 }
 
+// ========== 디버그 함수 (편집기에서 직접 실행) ==========
+
+/**
+ * 시트의 실제 컬럼명(키) 확인
+ * __Settings 템플릿 작성 시 사용할 변수명을 확인합니다.
+ * Apps Script 편집기에서 직접 실행하세요.
+ */
+function debugRowKeys() {
+  const sheet = _getResponseSheet();
+  const manager = new SheetManager(sheet);
+
+  if (manager.data.length === 0) {
+    Logger.log("데이터가 없습니다.");
+    return;
+  }
+
+  const lastRow = manager.data[manager.data.length - 1];
+  Logger.log("=== 사용 가능한 템플릿 변수 목록 ===");
+  Object.keys(lastRow)
+    .filter(k => k !== "__row")
+    .forEach(k => Logger.log(`{{${k}}} = "${lastRow[k]}"`));
+}
+
 // ========== Private 함수 ==========
 
 /**
@@ -177,10 +200,10 @@ function resendPendingEmails() {
 function _getResponseSheet() {
   const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
   const sheet = ss.getSheetByName(CONFIG.SHEETS.RESPONSES);
-  
+
   if (!sheet) {
     throw new Error(`'${CONFIG.SHEETS.RESPONSES}' 시트를 찾을 수 없습니다.`);
   }
-  
+
   return sheet;
 }

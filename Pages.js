@@ -2,26 +2,29 @@
  * ============================================
  * Pages.gs - HTML 페이지 생성
  * ============================================
- * 
+ *
  * 승인/반려/에러 등 결과 페이지 생성
  */
 
 /**
  * 리다이렉트 페이지 생성
- * 
+ *
  * @param {string} url - 이동할 URL
  */
 function createRedirectPage(url) {
+  const safeUrl = Utils.escapeHtml(url);       // HTML 속성용
+  const jsUrl = JSON.stringify(url);            // JS 문자열용 (따옴표 포함)
+
   return HtmlService.createHtmlOutput(`
     <html>
       <head>
-        <meta http-equiv="refresh" content="0;url=${url}">
+        <meta http-equiv="refresh" content="0;url=${safeUrl}">
         <script>
-          window.top.location.href = "${url}";
+          window.top.location.href = ${jsUrl};
         </script>
       </head>
       <body>
-        <p>이동 중입니다. 자동으로 이동하지 않으면 <a href="${url}" target="_top">여기</a>를 클릭하세요.</p>
+        <p>이동 중입니다. 자동으로 이동하지 않으면 <a href="${safeUrl}" target="_top">여기</a>를 클릭하세요.</p>
       </body>
     </html>
   `)
@@ -31,12 +34,13 @@ function createRedirectPage(url) {
 
 /**
  * 승인/반려 완료 페이지 생성
- * 
+ *
  * @param {string} icon - 아이콘 (✅ 또는 ❌)
  * @param {string} message - 메시지
  * @param {string} color - 색상 코드
  */
 function createApprovalPage(icon, message, color) {
+  // icon, message, color 모두 내부 상수에서 오므로 이스케이프 불필요
   return HtmlService.createHtmlOutput(`
     <html>
     <head>
@@ -74,10 +78,12 @@ function createApprovalPage(icon, message, color) {
 
 /**
  * 에러 페이지 생성
- * 
+ *
  * @param {string} errorMessage - 에러 메시지
  */
 function createErrorPage(errorMessage) {
+  const safeMessage = Utils.escapeHtml(errorMessage);
+
   return HtmlService.createHtmlOutput(`
     <html>
     <head>
@@ -105,7 +111,7 @@ function createErrorPage(errorMessage) {
     <body>
       <div class="error-box">
         <h3>⚠️ 처리 중 오류가 발생했습니다</h3>
-        <p>원인: ${errorMessage}</p>
+        <p>원인: ${safeMessage}</p>
         <p>시트 이름과 배포 권한을 다시 확인해 주세요.</p>
       </div>
     </body>
