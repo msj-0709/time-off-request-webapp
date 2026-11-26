@@ -84,6 +84,33 @@
     .hidden { display: none !important; }
     .install { font-size: 13px; color: var(--muted); }
     .tip { background: var(--primary-weak); }
+    .cal-card { padding: 12px 10px; }
+    .cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+    .cal-title { font-size: 17px; font-weight: 700; }
+    .cal-nav { width: 44px; height: 44px; border: 0; border-radius: 10px; background: var(--gray-weak); font-size: 24px; line-height: 1; cursor: pointer; color: var(--text); }
+    .cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
+    .cal-dow div { text-align: center; font-size: 12px; color: var(--muted); padding: 4px 0; }
+    .cal-dow div:first-child, .cal-day.red .num { color: var(--bad); }
+    .cal-dow div:last-child { color: var(--primary); }
+    .cal-day { min-height: 66px; border-radius: 8px; padding: 3px 2px; cursor: pointer; overflow: hidden; background: #fff; border: 1px solid transparent; }
+    .cal-day.out { opacity: .35; }
+    .cal-day.sel { border-color: var(--primary); background: var(--primary-weak); }
+    .cal-day .num { font-size: 12px; font-weight: 600; text-align: center; height: 20px; line-height: 20px; }
+    .cal-day.sat .num { color: var(--primary); }
+    .cal-day.today .num span { background: var(--primary); color: #fff; border-radius: 10px; padding: 1px 6px; }
+    .cal-day .hol { font-size: 9px; color: var(--bad); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ev { display: block; font-size: 10.5px; line-height: 16px; border-radius: 4px; padding: 0 1px; margin-top: 2px;
+      white-space: nowrap; overflow: hidden; text-overflow: clip; font-weight: 600; text-align: center; letter-spacing: -0.4px; }
+    .ev.s-APPROVED { background: var(--ok-weak); color: var(--ok); }
+    .ev.s-PENDING { background: var(--wait-weak); color: var(--wait); }
+    .ev.mine { box-shadow: inset 0 0 0 1px var(--primary); }
+    .ev.half.s-APPROVED { background: linear-gradient(90deg, var(--ok-weak) 50%, #fff 50%); box-shadow: inset 0 0 0 1px var(--ok-weak); }
+    .ev.half.s-PENDING { background: linear-gradient(90deg, var(--wait-weak) 50%, #fff 50%); box-shadow: inset 0 0 0 1px var(--wait-weak); }
+    .ev.half.mine { box-shadow: inset 0 0 0 1px var(--primary); }
+    .ev.more { color: var(--muted); background: none; font-weight: 400; }
+    .cal-legend { display: flex; gap: 8px; align-items: center; margin-top: 10px; font-size: 12px; flex-wrap: wrap; }
+    .cal-legend .ev { display: inline-block; margin: 0; font-size: 12px; padding: 1px 6px; }
+    .cal-legend .linkbtn { margin-left: auto; padding: 0; }
     .tip .hint { margin-top: 4px; }
     .login { max-width: 420px; margin: 8vh auto 0; }
     .login h2 { font-size: 20px; }
@@ -178,6 +205,17 @@
 
     <!-- 팀 일정 -->
     <section id="tab-team" class="hidden">
+      <div class="card cal-card">
+        <div class="cal-head">
+          <button class="cal-nav" id="calPrev" type="button" aria-label="이전 달">‹</button>
+          <div class="cal-title" id="calTitle"></div>
+          <button class="cal-nav" id="calNext" type="button" aria-label="다음 달">›</button>
+        </div>
+        <div class="cal-grid cal-dow"><div>일</div><div>월</div><div>화</div><div>수</div><div>목</div><div>금</div><div>토</div></div>
+        <div class="cal-grid" id="calGrid"></div>
+        <div class="cal-legend"><span class="ev s-APPROVED">승인</span><span class="ev s-PENDING">승인 대기</span><span class="ev s-APPROVED half">반차</span><span class="ev mine">내 휴가</span>
+          <button class="linkbtn" id="calToday" type="button">오늘</button></div>
+      </div>
       <div class="card" id="teamList"></div>
       <div class="card install">
         <details>
@@ -369,16 +407,75 @@
     }).join("");
   }
 
-  function renderTeam() {
-    var list = data.team;
-    if (!list.length) { $("teamList").innerHTML = '<h2>팀 일정</h2><div class="empty">예정된 휴가가 없습니다.</div>'; return; }
-    var html = '<h2>팀 일정</h2>', cur = "";
-    list.forEach(function (r) {
-      var m = r.start.slice(0, 7);
-      if (m !== cur) { cur = m; html += '<div class="month">' + m.replace("-", "년 ") + '월</div>'; }
-      html += item(r, "", true);
+  // ---------- 팀 일정 캘린더 ----------
+  var cal = { month: "", day: "" };   // month: 'yyyy-mm', day: 'yyyy-mm-dd'
+
+  // 날짜별 휴가 목록 (주말·공휴일 제외)
+  function leavesByDay() {
+    var map = {};
+    (data.team || []).forEach(function (r) {
+      if (!r.start || !r.end) return;
+      var d = parse(r.start), last = parse(r.end);
+      while (d <= last) {
+        var k = iso(d), w = d.getUTCDay();
+        if (w !== 0 && w !== 6 && !holidaySet[k]) (map[k] = map[k] || []).push(r);
+        d.setUTCDate(d.getUTCDate() + 1);
+      }
     });
-    $("teamList").innerHTML = html;
+    return map;
+  }
+
+  function isHalf(r) { return !!(r.sub && r.sub.indexOf("반차") >= 0); }
+
+  function renderTeam() {
+    if (!cal.month) { cal.month = data.today.slice(0, 7); cal.day = data.today; }
+    var byDay = leavesByDay(), names = data.holidayNames || {};
+    var y = +cal.month.slice(0, 4), m = +cal.month.slice(5, 7);
+    $("calTitle").textContent = y + "년 " + m + "월";
+
+    var first = new Date(Date.UTC(y, m - 1, 1));
+    var d = new Date(first); d.setUTCDate(1 - first.getUTCDay());
+    var html = "";
+    for (var i = 0; i < 42; i++) {
+      var k = iso(d), w = d.getUTCDay(), inMonth = d.getUTCMonth() === m - 1;
+      if (i >= 35 && !inMonth && d.getUTCDate() <= 7 && w === 0) break; // 6번째 주가 통째로 다음 달이면 생략
+      var evs = byDay[k] || [], cls = "cal-day";
+      if (!inMonth) cls += " out";
+      if (w === 0 || names[k]) cls += " red"; else if (w === 6) cls += " sat";
+      if (k === data.today) cls += " today";
+      if (k === cal.day) cls += " sel";
+      html += '<div class="' + cls + '" data-day="' + k + '"><div class="num"><span>' + d.getUTCDate() + '</span></div>' +
+        (names[k] ? '<div class="hol">' + esc(names[k]) + '</div>' : '');
+      var max = names[k] ? 1 : 2;
+      evs.slice(0, evs.length > max + 1 ? max : max + 1).forEach(function (r) {
+        html += '<span class="ev s-' + esc(r.state) + (r.mine ? " mine" : "") + (isHalf(r) ? " half" : "") +
+          '" title="' + esc(r.name + (r.sub ? " " + r.sub : "")) + '">' + esc(r.name) + '</span>';
+      });
+      if (evs.length > max + 1) html += '<span class="ev more">+' + (evs.length - max) + '</span>';
+      html += '</div>';
+      d.setUTCDate(d.getUTCDate() + 1);
+    }
+    $("calGrid").innerHTML = html;
+    renderDay(byDay);
+  }
+
+  function renderDay(byDay) {
+    var k = cal.day, list = (byDay || leavesByDay())[k] || [], names = data.holidayNames || {};
+    var w = parse(k).getUTCDay();
+    var head = '<h2>' + pretty(k) + (names[k] ? ' · <span style="color:var(--bad)">' + esc(names[k]) + '</span>' : '') + '</h2>';
+    if (!list.length) {
+      $("teamList").innerHTML = head + '<div class="empty">' + (w === 0 || w === 6 || names[k] ? "휴일입니다." : "휴가자가 없습니다.") + '</div>';
+      return;
+    }
+    $("teamList").innerHTML = head + list.map(function (r) { return item(r, "", true); }).join("");
+  }
+
+  function moveMonth(delta) {
+    var y = +cal.month.slice(0, 4), m = +cal.month.slice(5, 7) - 1 + delta;
+    var dt = new Date(Date.UTC(y, m, 1));
+    cal.month = iso(dt).slice(0, 7);
+    cal.day = cal.month === data.today.slice(0, 7) ? data.today : iso(dt);
+    renderTeam();
   }
 
   function updateEstimate() {
@@ -435,6 +532,27 @@
     if (t.dataset.deny && confirm("반려할까요?")) call("denyRequest", [t.dataset.deny], "반려되었습니다.");
     if (t.dataset.cancel && confirm("이 신청을 취소할까요?")) call("cancelRequest", [t.dataset.cancel], "취소되었습니다.");
   });
+
+  $("calPrev").addEventListener("click", function () { moveMonth(-1); });
+  $("calNext").addEventListener("click", function () { moveMonth(1); });
+  $("calToday").addEventListener("click", function () { cal.month = ""; renderTeam(); });
+  $("calGrid").addEventListener("click", function (ev) {
+    var c = ev.target.closest(".cal-day"); if (!c) return;
+    var k = c.dataset.day;
+    if (k.slice(0, 7) !== cal.month) { cal.month = k.slice(0, 7); }
+    cal.day = k; renderTeam();
+  });
+  // 좌우 스와이프로 달 이동
+  (function () {
+    var x0 = null, y0 = null, g = $("calGrid");
+    g.addEventListener("touchstart", function (e) { x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; }, { passive: true });
+    g.addEventListener("touchend", function (e) {
+      if (x0 === null) return;
+      var dx = e.changedTouches[0].clientX - x0, dy = e.changedTouches[0].clientY - y0;
+      if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) moveMonth(dx < 0 ? 1 : -1);
+      x0 = null;
+    }, { passive: true });
+  })();
 
   // ---------- 로그인 이벤트 ----------
   $("loginForm").addEventListener("submit", function (ev) {

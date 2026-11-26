@@ -35,11 +35,12 @@ function getBootstrap(token) {
       (r.approver === ctx.email || ctx.isAdmin))
     .sort((a, b) => a.start.localeCompare(b.start));
 
-  const fromDate = _fmt_(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+  // 캘린더에서 지난 3개월까지 볼 수 있도록
+  const fromDate = _fmt_(new Date(new Date().getFullYear(), new Date().getMonth() - 3, 1));
   const team = dtos
     .filter(r => (r.state === STATES.APPROVED || r.state === STATES.PENDING) && r.end >= fromDate)
     .sort((a, b) => a.start.localeCompare(b.start))
-    .map(r => ({ name: r.name, type: r.type, sub: r.sub, start: r.start, end: r.end, state: r.state, days: r.days }));
+    .map(r => ({ name: r.name, type: r.type, sub: r.sub, start: r.start, end: r.end, state: r.state, days: r.days, mine: r.email === ctx.email }));
 
   const pendingDays = mine
     .filter(r => r.state === STATES.PENDING && r.type === "연차")
@@ -53,6 +54,7 @@ function getBootstrap(token) {
     balance: _getBalance_(myName),
     pendingDays,
     holidays: Object.keys(holidays),
+    holidayNames: holidays,
     mine,
     inbox,
     team,
@@ -340,14 +342,17 @@ function _getBalance_(name) {
   }
 }
 
-/** 데이터 시트의 공휴일 (E열) → { 'yyyy-MM-dd': true } */
+/** 데이터 시트의 공휴일 (E열 날짜, F열 이름) → { 'yyyy-MM-dd': '공휴일명' } */
 function _getHolidays_() {
   const map = {};
   try {
     const sh = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID).getSheetByName(CONFIG.SHEETS.HOLIDAYS);
     if (!sh || sh.getLastRow() < 3) return map;
-    sh.getRange(3, 5, sh.getLastRow() - 2, 1).getValues().forEach(([v]) => {
-      if (v instanceof Date) map[_fmt_(v)] = true;
+    sh.getRange(3, 5, sh.getLastRow() - 2, 2).getValues().forEach(([v, name]) => {
+      if (!(v instanceof Date)) return;
+      // 신정 행은 이름 칸에 날짜가 들어가 있는 경우가 있어 보정
+      const label = name instanceof Date ? "신정" : String(name || "").trim();
+      map[_fmt_(v)] = label || "공휴일";
     });
   } catch (e) {
     Logger.log(`⚠️ 공휴일 조회 실패: ${e.message}`);
